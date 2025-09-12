@@ -22,6 +22,7 @@ class HistoricalDataManager {
         if (this.history.some(item => item.phien === newData.phien)) {
             return false;
         }
+
         this.history.push(newData);
         if (this.history.length > this.maxHistoryLength) {
             this.history = this.history.slice(this.history.length - this.maxHistoryLength);
@@ -107,7 +108,7 @@ class PredictionEngine {
 
         if (historyLength === 1) {
             const du_doan = (lastResult.toLowerCase() === 'tài') ? "Xỉu" : "Tài";
-            return this.buildResult(du_doan, 30, "Dữ liệu ít, dự đoán ngẫu nhiên");
+            return this.buildResult(du_doan, 30, "Dữ liệu còn ít, đảo chiều");
         }
 
         let predictionScores = { 'Tài': 0, 'Xỉu': 0 };
@@ -178,11 +179,7 @@ class PredictionEngine {
         confidence = confidence * Math.min(1, historyLength / 100);
         confidence = Math.min(99.99, Math.max(10, confidence));
 
-        return this.buildResult(
-            finalPrediction,
-            confidence,
-            "địt bố m"
-        );
+        return this.buildResult(finalPrediction, confidence, "Dựa trên chuỗi gần nhất và mẫu thống kê");
     }
 
     isAlternating(history, groupSize) {
@@ -199,14 +196,14 @@ class PredictionEngine {
 const historyManager = new HistoricalDataManager(500);
 const predictionEngine = new PredictionEngine(historyManager);
 
-// Hàm hỗ trợ gọi API
+// Hàm hỗ trợ gọi API với retry
 async function fetchDataWithRetry(url, retries = 5, delay = 2000) {
     try {
         const response = await axios.get(url, { timeout: 10000 });
         return response.data;
     } catch (error) {
         if (error.response && error.response.status === 429 && retries > 0) {
-            console.warn(`Đã nhận lỗi 429, thử lại sau ${delay}ms...`);
+            console.warn(`Đã nhận lỗi 429, đang thử lại sau ${delay}ms...`);
             await new Promise(resolve => setTimeout(resolve, delay));
             return fetchDataWithRetry(url, retries - 1, delay * 2);
         }
@@ -214,7 +211,7 @@ async function fetchDataWithRetry(url, retries = 5, delay = 2000) {
     }
 }
 
-// API dự đoán
+// API chính
 app.get('/concac/ditme/lxk', async (req, res) => {
     try {
         const currentData = await fetchDataWithRetry(SUNWIN_API_URL);
@@ -226,35 +223,36 @@ app.get('/concac/ditme/lxk', async (req, res) => {
             });
         }
 
+        // Chuẩn hoá dữ liệu từ API gốc
         const normalizedData = {
-            phien: currentData.Phien,
+            phien: parseInt(currentData.Phien.toString().replace('#', '')),
             ket_qua: currentData.Ket_qua,
             tong: currentData.Tong,
-            xuc_xac_1: currentData.Xuc_xac_1,
-            xuc_xac_2: currentData.Xuc_xac_2,
-            xuc_xac_3: currentData.Xuc_xac_3
+            xuc_xac: [
+                currentData.Xuc_xac_1,
+                currentData.Xuc_xac_2,
+                currentData.Xuc_xac_3
+            ]
         };
 
+        // Lưu lịch sử để dự đoán
         historyManager.addSession(normalizedData);
-        historicalDataCache.set("full_history", historyManager.getHistory());
 
+        // Chạy dự đoán cho phiên sau
         const { du_doan, do_tin_cay, giai_thich } = predictionEngine.predict();
 
+        // Build response cuối cùng
         const result = {
             id: "@cskhtoollxk",
             phien_truoc: normalizedData.phien,
             ket_qua: normalizedData.ket_qua,
-            xuc_xac: [
-                normalizedData.xuc_xac_1,
-                normalizedData.xuc_xac_2,
-                normalizedData.xuc_xac_3
-            ],
+            xuc_xac: normalizedData.xuc_xac,
             tong: normalizedData.tong,
-            phien_sau: normalizedData.phien ? parseInt(normalizedData.phien.toString().replace('#', '')) + 1 : null,
-            du_doan: du_doan,
-            do_tin_cay: do_tin_cay,
+            phien_sau: normalizedData.phien + 1,
+            du_doan,
+            do_tin_cay,
             du_doan_vi: predictionEngine.duDoanVi(normalizedData.tong),
-            giai_thich: giai_thich
+            giai_thich
         };
 
         res.json(result);
@@ -265,7 +263,7 @@ app.get('/concac/ditme/lxk', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-    res.send('Chào mừng đến API Dự đoán Tài Xỉu');
+    res.send('API Sicbo Prediction đang chạy 🚀');
 });
 
 app.listen(PORT, () => {
