@@ -4,21 +4,25 @@ import axios from "axios";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 👉 Thay link API gốc thật của bạn ở đây
 const API_URL = "https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1";
 
-// Cache phiên cuối cùng
 let latestResult = null;
+let isFetching = false;
+let lastGameNum = null;
+let intervalMs = 10000; // poll mặc định 10s
 
 // Hàm fetch API gốc
 async function fetchData() {
+  if (isFetching) return;
+  isFetching = true;
+
   try {
     const res = await axios.get(API_URL, {
       headers: { "User-Agent": "Mozilla/5.0" },
-      timeout: 5000,
+      timeout: 7000,
     });
 
-    const raw = res.data?.data?.[0] || res.data; // phòng nhiều format
+    const raw = res.data;
     if (!raw?.gameNum || !raw?.facesList) {
       console.log("⚠️ Sai format:", res.data);
       return;
@@ -41,15 +45,36 @@ async function fetchData() {
       Ket_qua: ketQua,
     };
 
-    console.log("✅ Cập nhật:", latestResult);
+    // Nếu có phiên mới → log ngay và giữ tốc độ
+    if (raw.gameNum !== lastGameNum) {
+      console.log("🎯 Phiên mới:", latestResult);
+      lastGameNum = raw.gameNum;
+      intervalMs = 10000; // giữ poll nhanh khi đang có phiên mới
+    } else {
+      // Nếu trùng phiên cũ → giảm tốc để tránh spam
+      intervalMs = 15000;
+    }
   } catch (err) {
-    console.log("❌ Lỗi fetch API:", err.response?.status || err.message);
+    const code = err.response?.status || err.code || err.message;
+    console.log("❌ Lỗi fetch:", code);
+
+    // Nếu bị 429 → chờ lâu hơn
+    if (code === 429) {
+      intervalMs = 30000;
+    }
+  } finally {
+    isFetching = false;
+    scheduleNext();
   }
 }
 
-// Poll 5s/lần để luôn có phiên mới
-setInterval(fetchData, 5000);
-fetchData(); // gọi ngay khi start
+// Lên lịch gọi tiếp
+function scheduleNext() {
+  setTimeout(fetchData, intervalMs);
+}
+
+// Bắt đầu fetch ngay khi khởi động
+fetchData();
 
 // Endpoint client đọc cache
 app.get("/api/lxk", (req, res) => {
