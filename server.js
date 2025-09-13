@@ -6,17 +6,35 @@ const PORT = process.env.PORT || 3000;
 // URL API gốc
 const SOURCE_API_URL = 'https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1';
 
-// Cache lưu dữ liệu
+// Cache dữ liệu
 let latestResult = null;
-let lastFetchTime = 0;
 
-// Hàm fetch API gốc
-async function fetchData() {
-  const now = Date.now();
-  if (now - lastFetchTime < 3000 && latestResult) {
-    return latestResult; // Dùng cache nếu mới fetch < 3s
-  }
+// ===== Hàm chuẩn hóa kết quả =====
+function parseResult(raw) {
+  if (!raw || !raw.id || !raw.dices) return null;
 
+  const dices = raw.dices;
+  const point = raw.point;
+  let ketQua = raw.resultTruyenThong || "";
+
+  // Chuẩn hóa kết quả
+  if (ketQua.toLowerCase() === "tai") ketQua = "Tài";
+  else if (ketQua.toLowerCase() === "xiu") ketQua = "Xỉu";
+  else ketQua = "Bão";
+
+  return {
+    Ket_qua: ketQua,
+    Phien: `${raw.id}`,
+    Tong: point,
+    Xuc_xac_1: dices[0],
+    Xuc_xac_2: dices[1],
+    Xuc_xac_3: dices[2],
+    id: "@anhbaocx"
+  };
+}
+
+// ===== Hàm fetch API gốc định kỳ =====
+async function fetchAPI() {
   try {
     const response = await axios.get(SOURCE_API_URL, {
       headers: {
@@ -27,55 +45,36 @@ async function fetchData() {
 
     const data = response.data;
     const raw = data?.list?.[0] || data;
+    const parsed = parseResult(raw);
 
-    if (!raw || !raw.id || !raw.dices) {
-      throw new Error("API gốc trả về dữ liệu không hợp lệ");
+    if (parsed) {
+      latestResult = parsed;
+      console.log("✅ Cập nhật phiên mới:", parsed);
+    } else {
+      console.warn("⚠️ Không parse được dữ liệu:", raw);
     }
-
-    const dices = raw.dices;
-    const point = raw.point;
-    let ketQua = raw.resultTruyenThong;
-
-    // Chuẩn hóa kết quả
-    if (ketQua?.toLowerCase() === "tai") ketQua = "Tài";
-    else if (ketQua?.toLowerCase() === "xiu") ketQua = "Xỉu";
-    else ketQua = "Bão";
-
-    latestResult = {
-      Ket_qua: ketQua,
-      Phien: `${raw.id}`,
-      Tong: point,
-      Xuc_xac_1: dices[0],
-      Xuc_xac_2: dices[1],
-      Xuc_xac_3: dices[2],
-      id: "@cskhtoollxk"
-    };
-
-    lastFetchTime = now;
-    return latestResult;
-
   } catch (error) {
-    console.error("❌ Lỗi khi gọi API gốc:", error.message);
-    throw error;
+    console.error("❌ Lỗi fetch API gốc:", error.message);
   }
 }
 
-// Endpoint
-app.get('/api/lxk', async (req, res) => {
-  try {
-    const result = await fetchData();
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({
-      error: "Không thể lấy dữ liệu từ API gốc.",
-      details: error.message
-    });
+// ===== Endpoint công khai =====
+app.get('/api/lxk', (req, res) => {
+  if (latestResult) {
+    res.json(latestResult);
+  } else {
+    res.status(503).json({ error: "Chưa có dữ liệu, vui lòng thử lại sau." });
   }
 });
 
+// ===== Endpoint mặc định =====
 app.get('/', (req, res) => {
   res.send('👉 API Phiên Gần Nhất. Truy cập /api/lxk để xem kết quả.');
 });
+
+// ===== Chạy định kỳ 5 giây fetch 1 lần =====
+setInterval(fetchAPI, 5000);
+fetchAPI(); // gọi ngay lần đầu khi server start
 
 app.listen(PORT, () => {
   console.log(`🚀 Server chạy trên cổng ${PORT}`);
