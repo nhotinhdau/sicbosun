@@ -1,20 +1,24 @@
+// server.js
 const express = require("express");
 const axios = require("axios");
+const NodeCache = require("node-cache");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const API_URL = "https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1";
+// Cache dữ liệu để client gọi không tốn nhiều request API gốc
+const cache = new NodeCache({ stdTTL: 60, checkperiod: 120 });
 
-let latestResult = null;
-let lastGameNum = null;
-let isFetching = false;
-let intervalMs = 10000; // 10s mặc định
+// URL API gốc (bạn thay vào API của bạn)
+const API_URL = "https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1"; 
 
+// Biến điều khiển polling
+let intervalMs = 20000; // 20 giây mặc định
+let backoff = 0;
+let latestData = null;
+
+// Hàm fetch dữ liệu có chống 429
 async function fetchData() {
-  if (isFetching) return;
-  isFetching = true;
-
   try {
     const res = await axios.get(API_URL, {
       headers: { "User-Agent": "Mozilla/5.0" },
@@ -22,55 +26,53 @@ async function fetchData() {
     });
 
     const raw = res.data;
+
     if (!raw?.gameNum || !raw?.facesList) {
       console.log("⚠️ Sai format:", res.data);
       return;
     }
 
-    const [d1, d2, d3] = raw.facesList.map(Number);
-    const tong = d1 + d2 + d3;
-
-    let ketQua = "Không xác định";
-    if (d1 === d2 && d2 === d3) ketQua = "Bão";
-    else if (tong >= 4 && tong <= 10) ketQua = "Xỉu";
-    else if (tong >= 11 && tong <= 17) ketQua = "Tài";
-
-    latestResult = {
-      Phien: raw.gameNum.replace("#", ""),
-      Xuc_xac_1: d1,
-      Xuc_xac_2: d2,
-      Xuc_xac_3: d3,
-      Tong: tong,
-      Ket_qua: ketQua,
+    latestData = {
+      phien: raw.gameNum,
+      xuc_xac: raw.facesList,
+      tong: raw.facesList.reduce((a, b) => a + b, 0),
+      ket_qua: raw.facesList.reduce((a, b) => a + b, 0) >= 11 ? "Tài" : "Xỉu",
+      thoigian: new Date().toISOString(),
     };
 
-    if (raw.gameNum !== lastGameNum) {
-      console.log("🎯 Phiên mới:", latestResult);
-      lastGameNum = raw.gameNum;
-      intervalMs = 10000; // giữ poll nhanh khi có phiên mới
-    } else {
-      intervalMs = 15000; // chậm lại nếu chưa có phiên mới
-    }
+    cache.set("latest", latestData);
+
+    console.log("✅ Cập nhật phiên:", latestData.phien);
+
+    // reset backoff khi thành công
+    backoff = 0;
+    intervalMs = 20000;
   } catch (err) {
     const code = err.response?.status || err.code || err.message;
     console.log("❌ Lỗi fetch:", code);
 
     if (code === 429) {
-      intervalMs = 30000; // nếu bị limit thì đợi lâu hơn
+      // tăng thời gian chờ dần để né block
+      backoff = backoff ? backoff * 2 : 30000;
+      intervalMs = Math.min(backoff, 120000); // tối đa 2 phút
+      console.log("⏳ Bị 429 → delay", intervalMs / 1000, "giây");
     }
   } finally {
-    isFetching = false;
     setTimeout(fetchData, intervalMs);
   }
 }
 
+// chạy vòng lặp fetch
 fetchData();
 
-app.get("/api/lxk", (req, res) => {
-  if (latestResult) return res.json(latestResult);
-  return res.status(503).json({ error: "Chưa có dữ liệu, vui lòng thử lại." });
+// API cho client lấy dữ liệu mới nhất
+app.get("/api/taixiu/latest", (req, res) => {
+  if (!latestData) {
+    return res.status(503).json({ error: "Chưa có dữ liệu" });
+  }
+  res.json(latestData);
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server chạy tại cổng ${PORT}`);
+  console.log(`🚀 Server chạy tại http://localhost:${PORT}`);
 });
