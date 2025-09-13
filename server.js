@@ -1,71 +1,71 @@
-const express = require("express");
-const axios = require("axios"); // Import axios
-const rateLimit = require("express-rate-limit");
-
+const express = require('express');
+const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// URL API gốc của bạn
-const API_URL = "https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1"; // Thay thế bằng URL API của bạn
+// URL API gốc
+const SOURCE_API_URL = 'https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1';
 
-// Biến lưu phiên mới nhất
+// Cache lưu dữ liệu
 let latestResult = null;
+let lastFetchTime = 0;
 
-// Hàm lấy dữ liệu từ API
-async function fetchLatestResult() {
-    try {
-        const response = await axios.get(API_URL);
-        const json = response.data;
-        
-        // Chuyển đổi dữ liệu về đúng format
-        latestResult = {
-            gameNum: json.Phien,
-            score: json.Tong,
-            resultType: json.Ket_qua,
-            facesList: [
-                json.Xuc_xac_1,
-                json.Xuc_xac_2,
-                json.Xuc_xac_3
-            ]
-        };
+// Hàm fetch API gốc
+async function fetchData() {
+  const now = Date.now();
+  if (now - lastFetchTime < 3000 && latestResult) {
+    return latestResult; // Dùng cache nếu mới fetch < 3s
+  }
 
-        console.log("🎲 Phiên mới nhất:", latestResult);
-    } catch (err) {
-        console.error("❌ Lỗi khi lấy dữ liệu từ API:", err.message);
+  try {
+    const response = await axios.get(SOURCE_API_URL, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        "Accept": "application/json,text/plain,/"
+      }
+    });
+
+    const data = response.data;
+    const raw = data?.list?.[0] || data;
+
+    if (!raw || !raw.id || !raw.dices) {
+      throw new Error("API gốc trả về dữ liệu không hợp lệ");
     }
+
+    // Chuẩn hóa sang định dạng mới
+    latestResult = {
+      gameNum: `#${raw.id}`,
+      score: raw.point,
+      resultType: raw.resultTruyenThong?.toLowerCase() === "tai" ? 1 : raw.resultTruyenThong?.toLowerCase() === "xiu" ? 2 : 3,
+      facesList: raw.dices
+    };
+
+    lastFetchTime = now;
+    return latestResult;
+
+  } catch (error) {
+    console.error("❌ Lỗi khi gọi API gốc:", error.message);
+    throw error;
+  }
 }
 
-// Lấy dữ liệu lần đầu
-fetchLatestResult();
-
-// Lập lịch để lấy dữ liệu định kỳ mỗi 1 giây (1000ms)
-setInterval(fetchLatestResult, 1000);
-
-// --- Cấu hình Rate Limiter cho API ---
-const apiLimiter = rateLimit({
-    windowMs: 1 * 60 * 1000, // 1 phút
-    max: 10, // Giới hạn mỗi IP chỉ được gọi 10 request trong 1 phút
-    message: "🚫 Quá nhiều yêu cầu từ IP này, vui lòng thử lại sau 1 phút.",
-    statusCode: 429,
-    headers: true,
+// Endpoint
+app.get('/api/lxk', async (req, res) => {
+  try {
+    const result = await fetchData();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      error: "Không thể lấy dữ liệu từ API gốc.",
+      details: error.message
+    });
+  }
 });
 
-// REST API lấy phiên mới nhất
-app.get("/api/lxk", apiLimiter, (req, res) => {
-    if (!latestResult) {
-        return res.status(503).json({
-            error: "Chưa có dữ liệu",
-            details: "Vui lòng thử lại sau vài giây."
-        });
-    }
-    res.json(latestResult);
-});
-
-// Endpoint mặc định
-app.get("/", (req, res) => {
-    res.send("API Tai Xiu. Truy cap /api/taixiu/latest de xem phien moi nhat.");
+app.get('/', (req, res) => {
+  res.send('👉 API Phiên Gần Nhất. Truy cập /api/lxk để xem kết quả.');
 });
 
 app.listen(PORT, () => {
-    console.log(`🚀 Server chay tai http://localhost:${PORT}`);
+  console.log(`🚀 Server chạy trên cổng ${PORT}`);
 });
