@@ -3,9 +3,10 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const SOURCE_API_URL = 'https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1';
+const SOURCE_API_URL =
+  'https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1';
 
-// Biến cache
+// Cache
 let latestResult = null;
 
 // Hàm chuẩn hóa dữ liệu
@@ -31,7 +32,7 @@ function parseResult(raw) {
   };
 }
 
-// Hàm fetch API gốc
+// Hàm fetch API gốc (có retry)
 async function fetchAPI() {
   try {
     const response = await axios.get(SOURCE_API_URL, {
@@ -39,7 +40,7 @@ async function fetchAPI() {
         "User-Agent": "Mozilla/5.0",
         "Accept": "application/json"
       },
-      timeout: 8000
+      timeout: 10000
     });
 
     const data = response.data;
@@ -48,26 +49,25 @@ async function fetchAPI() {
 
     if (parsed) {
       latestResult = parsed;
-      console.log("✅ Lấy phiên mới:", parsed);
+      console.log("✅ Cập nhật phiên mới:", parsed);
     } else {
-      console.warn("⚠️ Không parse được dữ liệu:", raw);
+      console.warn("⚠️ API gốc trả dữ liệu không hợp lệ:", raw);
     }
-
   } catch (error) {
     if (error.response && error.response.status === 429) {
-      console.error("⏳ Dính 429, giữ phiên cũ và thử lại sau...");
+      console.error("⏳ Bị 429, giữ nguyên phiên cũ, thử lại sau...");
     } else {
       console.error("❌ Lỗi fetch API gốc:", error.message);
     }
   }
 }
 
-// Endpoint
+// Endpoint chính
 app.get('/api/lxk', (req, res) => {
   if (latestResult) {
-    res.json(latestResult); // Trả phiên mới nhất trong cache
+    res.json(latestResult); // luôn trả dữ liệu từ cache
   } else {
-    res.status(503).json({ error: "Chưa có dữ liệu, vui lòng thử lại sau." });
+    res.status(503).json({ error: "Chưa có dữ liệu, server đang lấy phiên đầu tiên." });
   }
 });
 
@@ -75,9 +75,9 @@ app.get('/', (req, res) => {
   res.send('👉 API Phiên Gần Nhất. Truy cập /api/lxk để xem kết quả.');
 });
 
-// Cập nhật phiên định kỳ
-setInterval(fetchAPI, 10000); // gọi 10s/lần
-fetchAPI(); // gọi ngay khi start
+// Gọi API gốc 1 lần mỗi 15 giây
+setInterval(fetchAPI, 15000);
+fetchAPI(); // gọi ngay khi khởi động
 
 app.listen(PORT, () => {
   console.log(`🚀 Server chạy trên cổng ${PORT}`);
