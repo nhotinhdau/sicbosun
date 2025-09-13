@@ -11,10 +11,10 @@ let latestResult = null;
 let lastFetchTime = 0;
 const CACHE_LIFETIME = 3000; // Thời gian cache: 3 giây
 
-// Hàm fetch API gốc với cơ chế thử lại
+// Hàm fetch API gốc với cơ chế thử lại và xử lý lỗi
 async function fetchDataWithRetry(retries = 3) {
   const now = Date.now();
-  // Sử dụng cache nếu dữ liệu vẫn còn mới
+  // Dùng cache nếu dữ liệu vẫn còn mới
   if (now - lastFetchTime < CACHE_LIFETIME && latestResult) {
     console.log("✅ Dùng dữ liệu từ cache.");
     return latestResult;
@@ -31,19 +31,18 @@ async function fetchDataWithRetry(retries = 3) {
         }
       });
 
-      const raw = response.data; // Lấy trực tiếp dữ liệu từ response
-
-      // Kiểm tra dữ liệu trả về theo định dạng mới bạn đã cung cấp
-      if (!raw || !raw.GameNum || !raw.facesList) {
+      const data = response.data;
+      
+      // Kiểm tra dữ liệu theo định dạng mới
+      if (!data || !data.Phien || !data.Xuc_xac_1 || !data.Xuc_xac_2 || !data.Xuc_xac_3) {
         throw new Error("API gốc trả về dữ liệu không hợp lệ");
       }
-
-      // Chuẩn hóa sang định dạng mới
+      
+      // Chuẩn hóa sang định dạng mong muốn
       latestResult = {
-        gameNum: raw.GameNum,
-        score: raw.score,
-        resultType: raw.resultType,
-        facesList: raw.facesList
+        gameNum: `#${data.Phien}`,
+        score: data.Tong,
+        facesList: [data.Xuc_xac_1, data.Xuc_xac_2, data.Xuc_xac_3]
       };
 
       lastFetchTime = Date.now();
@@ -87,4 +86,4 @@ app.listen(PORT, () => {
   console.log(`🚀 Server chạy trên cổng ${PORT}`);
 });
 
-    
+      
