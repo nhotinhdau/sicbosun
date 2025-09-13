@@ -1,4 +1,3 @@
-// server.js
 const express = require("express");
 const axios = require("axios");
 const NodeCache = require("node-cache");
@@ -6,18 +5,16 @@ const NodeCache = require("node-cache");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Cache dữ liệu để client gọi không tốn nhiều request API gốc
-const cache = new NodeCache({ stdTTL: 60, checkperiod: 120 });
+// URL API gốc (thay bằng link https thật của bạn)
+const API_URL = "https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1";
 
-// URL API gốc (bạn thay vào API của bạn)
-const API_URL = "https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1"; 
+// Cache dữ liệu 60s để client gọi không bị spam API gốc
+const cache = new NodeCache({ stdTTL: 60 });
 
-// Biến điều khiển polling
-let intervalMs = 20000; // 20 giây mặc định
-let backoff = 0;
-let latestData = null;
+// Biến lưu kết quả mới nhất
+let latestResult = null;
 
-// Hàm fetch dữ liệu có chống 429
+// Hàm fetch dữ liệu HTTPS
 async function fetchData() {
   try {
     const res = await axios.get(API_URL, {
@@ -26,51 +23,49 @@ async function fetchData() {
     });
 
     const raw = res.data;
+    // Giả sử API trả về có cấu trúc giống bạn gửi:
+    // { "gameNum": "#2199019", "score": 11, "resultType": 3, "facesList": [2,3,6] }
 
-    if (!raw?.gameNum || !raw?.facesList) {
-      console.log("⚠️ Sai format:", res.data);
-      return;
+    if (raw?.gameNum && raw?.facesList) {
+      latestResult = {
+        gameNum: raw.gameNum,
+        score: raw.score,
+        resultType: raw.resultType,
+        facesList: raw.facesList,
+      };
+
+      cache.set("latest", latestResult);
+      console.log("✅ Cập nhật phiên:", latestResult.gameNum);
+    } else {
+      console.log("⚠️ Format không hợp lệ:", raw);
     }
-
-    latestData = {
-      phien: raw.gameNum,
-      xuc_xac: raw.facesList,
-      tong: raw.facesList.reduce((a, b) => a + b, 0),
-      ket_qua: raw.facesList.reduce((a, b) => a + b, 0) >= 11 ? "Tài" : "Xỉu",
-      thoigian: new Date().toISOString(),
-    };
-
-    cache.set("latest", latestData);
-
-    console.log("✅ Cập nhật phiên:", latestData.phien);
-
-    // reset backoff khi thành công
-    backoff = 0;
-    intervalMs = 20000;
   } catch (err) {
-    const code = err.response?.status || err.code || err.message;
-    console.log("❌ Lỗi fetch:", code);
-
-    if (code === 429) {
-      // tăng thời gian chờ dần để né block
-      backoff = backoff ? backoff * 2 : 30000;
-      intervalMs = Math.min(backoff, 120000); // tối đa 2 phút
-      console.log("⏳ Bị 429 → delay", intervalMs / 1000, "giây");
-    }
+    console.log("❌ Lỗi fetch:", err.response?.status || err.message);
   } finally {
-    setTimeout(fetchData, intervalMs);
+    // delay 30–45s có random để né 429
+    const delay = 30000 + Math.floor(Math.random() * 15000);
+    console.log("⏳ Sẽ gọi lại sau", delay / 1000, "giây");
+    setTimeout(fetchData, delay);
   }
 }
 
-// chạy vòng lặp fetch
+// Gọi vòng lặp lần đầu
 fetchData();
 
-// API cho client lấy dữ liệu mới nhất
+// API cho client lấy phiên mới nhất
 app.get("/api/taixiu/latest", (req, res) => {
-  if (!latestData) {
-    return res.status(503).json({ error: "Chưa có dữ liệu" });
+  if (!latestResult) {
+    return res.status(503).json({
+      error: "Chưa có dữ liệu",
+      details: "Đợi vài giây để server lấy phiên đầu tiên.",
+    });
   }
-  res.json(latestData);
+  res.json(latestResult);
+});
+
+// Endpoint mặc định
+app.get("/", (req, res) => {
+  res.send("API HTTPS Tài Xỉu. Truy cập /api/taixiu/latest để xem phiên mới nhất.");
 });
 
 app.listen(PORT, () => {
