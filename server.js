@@ -4,7 +4,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // 👉 Link API gốc
-const SOURCE_API_URL = "https://wtx.tele68.com/v1/tx/sessions"; // thay link gốc
+const SOURCE_API_URL = "https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1"; // thay link gốc
 
 let latestResult = null;
 
@@ -64,3 +64,4 @@ fetchAPI();
 app.listen(PORT, () => {
   console.log(`🚀 Server chạy trên cổng ${PORT}`);
 });
+
