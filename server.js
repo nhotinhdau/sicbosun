@@ -1,5 +1,5 @@
-import express from "express";
-import axios from "axios";
+const express = require("express");
+const axios = require("axios");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -7,11 +7,10 @@ const PORT = process.env.PORT || 3000;
 const API_URL = "https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1";
 
 let latestResult = null;
-let isFetching = false;
 let lastGameNum = null;
-let intervalMs = 10000; // poll mặc định 10s
+let isFetching = false;
+let intervalMs = 10000; // 10s mặc định
 
-// Hàm fetch API gốc
 async function fetchData() {
   if (isFetching) return;
   isFetching = true;
@@ -45,43 +44,33 @@ async function fetchData() {
       Ket_qua: ketQua,
     };
 
-    // Nếu có phiên mới → log ngay và giữ tốc độ
     if (raw.gameNum !== lastGameNum) {
       console.log("🎯 Phiên mới:", latestResult);
       lastGameNum = raw.gameNum;
-      intervalMs = 10000; // giữ poll nhanh khi đang có phiên mới
+      intervalMs = 10000; // giữ poll nhanh khi có phiên mới
     } else {
-      // Nếu trùng phiên cũ → giảm tốc để tránh spam
-      intervalMs = 15000;
+      intervalMs = 15000; // chậm lại nếu chưa có phiên mới
     }
   } catch (err) {
     const code = err.response?.status || err.code || err.message;
     console.log("❌ Lỗi fetch:", code);
 
-    // Nếu bị 429 → chờ lâu hơn
     if (code === 429) {
-      intervalMs = 30000;
+      intervalMs = 30000; // nếu bị limit thì đợi lâu hơn
     }
   } finally {
     isFetching = false;
-    scheduleNext();
+    setTimeout(fetchData, intervalMs);
   }
 }
 
-// Lên lịch gọi tiếp
-function scheduleNext() {
-  setTimeout(fetchData, intervalMs);
-}
-
-// Bắt đầu fetch ngay khi khởi động
 fetchData();
 
-// Endpoint client đọc cache
 app.get("/api/lxk", (req, res) => {
   if (latestResult) return res.json(latestResult);
   return res.status(503).json({ error: "Chưa có dữ liệu, vui lòng thử lại." });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server chạy http://localhost:${PORT}`);
+  console.log(`🚀 Server chạy tại cổng ${PORT}`);
 });
