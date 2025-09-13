@@ -31,19 +31,19 @@ async function fetchDataWithRetry(retries = 3) {
         }
       });
 
-      const data = response.data;
-      const raw = data?.list?.[0] || data;
+      const raw = response.data; // Lấy trực tiếp dữ liệu từ response
 
-      if (!raw || !raw.id || !raw.dices) {
+      // Kiểm tra dữ liệu trả về theo định dạng mới bạn đã cung cấp
+      if (!raw || !raw.GameNum || !raw.facesList) {
         throw new Error("API gốc trả về dữ liệu không hợp lệ");
       }
 
       // Chuẩn hóa sang định dạng mới
       latestResult = {
-        gameNum: `#${raw.id}`,
-        score: raw.point,
-        resultType: raw.resultTruyenThong?.toLowerCase() === "tai" ? 1 : raw.resultTruyenThong?.toLowerCase() === "xiu" ? 2 : 3,
-        facesList: raw.dices
+        gameNum: raw.GameNum,
+        score: raw.score,
+        resultType: raw.resultType,
+        facesList: raw.facesList
       };
 
       lastFetchTime = Date.now();
@@ -87,4 +87,4 @@ app.listen(PORT, () => {
   console.log(`🚀 Server chạy trên cổng ${PORT}`);
 });
 
-                      
+    
