@@ -6,15 +6,15 @@ const PORT = process.env.PORT || 3000;
 // URL API gốc
 const SOURCE_API_URL = 'https://api.wsktnus8.net/v2/history/getLastResult?gameId=ktrng_3979&size=100&tableId=39791215743193&curPage=1';
 
-// Cache lưu dữ liệu
+// Cache data
 let latestResult = null;
 let lastFetchTime = 0;
-const CACHE_LIFETIME = 3000; // Thời gian cache: 3 giây
+const CACHE_LIFETIME = 3000; // Cache time: 3 seconds
 
-// Hàm fetch API gốc với cơ chế thử lại và xử lý lỗi
+// Function to fetch data with retry and format flexibility
 async function fetchDataWithRetry(retries = 3) {
   const now = Date.now();
-  // Dùng cache nếu dữ liệu vẫn còn mới
+  // Use cache if data is fresh
   if (now - lastFetchTime < CACHE_LIFETIME && latestResult) {
     console.log("✅ Dùng dữ liệu từ cache.");
     return latestResult;
@@ -32,18 +32,41 @@ async function fetchDataWithRetry(retries = 3) {
       });
 
       const data = response.data;
-      
-      // Kiểm tra dữ liệu theo định dạng mới
-      if (!data || !data.Phien || !data.Xuc_xac_1 || !data.Xuc_xac_2 || !data.Xuc_xac_3) {
-        throw new Error("API gốc trả về dữ liệu không hợp lệ");
+      let rawData = null;
+
+      // Try to parse different data structures
+      if (data?.list?.[0]?.id && data?.list?.[0]?.dices) {
+        // First format: { list: [ { id, dices, ... } ] }
+        rawData = data.list[0];
+        console.log("✅ Detected API format: { list: [ { id, dices, ... } ] }");
+        latestResult = {
+          gameNum: `#${rawData.id}`,
+          score: rawData.point,
+          facesList: rawData.dices
+        };
+      } else if (data?.resultList?.[0]?.gameNum && data?.resultList?.[0]?.facesList) {
+        // Second format: { resultList: [ { gameNum, facesList, ... } ] }
+        rawData = data.resultList[0];
+        console.log("✅ Detected API format: { resultList: [ { gameNum, facesList, ... } ] }");
+        const score = rawData.facesList.reduce((sum, face) => sum + face, 0);
+        latestResult = {
+          gameNum: rawData.gameNum,
+          score: score,
+          facesList: rawData.facesList
+        };
+      } else if (data?.Phien && data?.Tong && data?.Xuc_xac_1) {
+        // Third format: { Phien, Tong, Xuc_xac_1, ... }
+        rawData = data;
+        console.log("✅ Detected API format: { Phien, Tong, Xuc_xac_1, ... }");
+        latestResult = {
+          gameNum: `#${rawData.Phien}`,
+          score: rawData.Tong,
+          facesList: [rawData.Xuc_xac_1, rawData.Xuc_xac_2, rawData.Xuc_xac_3]
+        };
+      } else {
+        // If no format matches, throw an error
+        throw new Error("Không thể nhận diện định dạng dữ liệu từ API gốc.");
       }
-      
-      // Chuẩn hóa sang định dạng mong muốn
-      latestResult = {
-        gameNum: `#${data.Phien}`,
-        score: data.Tong,
-        facesList: [data.Xuc_xac_1, data.Xuc_xac_2, data.Xuc_xac_3]
-      };
 
       lastFetchTime = Date.now();
       console.log("✅ Lấy dữ liệu thành công!");
@@ -57,11 +80,11 @@ async function fetchDataWithRetry(retries = 3) {
         await new Promise(resolve => setTimeout(resolve, delay));
       } else {
         console.error(`❌ Lỗi khi gọi API gốc: ${err.message}`);
-        throw err; // Ném lỗi nếu không phải là 429
+        throw err; // Throw error if not a 429
       }
     }
   }
-  // Nếu tất cả các lần thử lại đều thất bại, ném lỗi cuối cùng
+  // If all retries fail, throw the last error
   throw error;
 }
 
@@ -86,4 +109,4 @@ app.listen(PORT, () => {
   console.log(`🚀 Server chạy trên cổng ${PORT}`);
 });
 
-      
+          
